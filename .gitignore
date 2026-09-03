@@ -36,3 +36,9 @@ imgui.ini
 
 # Tests: data files
 test/*.npz
+
+# Exported channel files (regenerate with scripts/export_oai_cir.py)
+*.cir
+cir/
+cir_out/
+cir_out_*/

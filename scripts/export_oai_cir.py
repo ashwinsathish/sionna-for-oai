@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from difflib import get_close_matches
 
 import numpy as np
 
@@ -21,7 +22,44 @@ from sionna_rt_gui.oai_cir_export import (
 
 
 def _parse_xyz(text: str) -> list[float]:
-    return [float(v) for v in text.replace(" ", "").split(",")]
+    xyz = [float(v) for v in text.replace(" ", "").split(",")]
+    if len(xyz) != 3:
+        raise argparse.ArgumentTypeError(f"expected x,y,z, got {text!r}")
+    return xyz
+
+
+def _get_built_in_scenes(rt) -> dict[str, str]:
+    scenes = {}
+    for var_name in dir(rt.scene):
+        var = getattr(rt.scene, var_name)
+        if isinstance(var, str) and var.endswith(".xml"):
+            scenes[var_name] = var
+            base = os.path.splitext(os.path.basename(var))[0]
+            scenes.setdefault(base, var)
+    return scenes
+
+
+def _resolve_scene_arg(scene_arg: str, rt) -> tuple[str, str | None]:
+    if os.path.exists(scene_arg):
+        return scene_arg, None
+
+    built_in_scenes = _get_built_in_scenes(rt)
+    normalized = os.path.splitext(os.path.basename(scene_arg))[0]
+    for key in (scene_arg, normalized):
+        if key in built_in_scenes and os.path.exists(built_in_scenes[key]):
+            return built_in_scenes[key], key
+
+    known_names = sorted(built_in_scenes)
+    suggestions = get_close_matches(normalized, known_names, n=5)
+    details = [
+        f'scene "{scene_arg}" was not found',
+        "Use an existing XML path or a built-in scene name.",
+    ]
+    if suggestions:
+        details.append("Did you mean one of: " + ", ".join(suggestions) + "?")
+    if "munich" in built_in_scenes:
+        details.append(f'Example: --scene munich  (resolves to {built_in_scenes["munich"]})')
+    raise FileNotFoundError("\n".join(details))
 
 
 def _trajectory_from_csv(csv_path: str, period_s: float) -> np.ndarray:
@@ -137,7 +175,7 @@ def export_trajectory(
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--scene", help="scene XML; omit with --demo")
+    p.add_argument("--scene", help="scene XML path or built-in scene name; omit with --demo")
     p.add_argument("--demo", action="store_true", help="built-in street canyon demo")
     p.add_argument("--ap", action="append", default=[], metavar="x,y,z", help="access-point position (repeatable)")
     p.add_argument("--csv", help="CSV trajectory with x,y,z columns")
@@ -161,7 +199,15 @@ def main() -> int:
             p.error("--scene is required unless --demo")
         if not args.ap:
             p.error("at least one --ap is required with --scene")
-        scene = rt.load_scene(args.scene)
+        try:
+            scene_path, scene_alias = _resolve_scene_arg(args.scene, rt)
+        except FileNotFoundError as e:
+            p.error(str(e))
+        if scene_alias is not None:
+            print(f'[export] scene "{args.scene}" resolved as "{scene_alias}" -> {scene_path}')
+        else:
+            print(f"[export] scene {scene_path}")
+        scene = rt.load_scene(scene_path)
         ap_xml = [_parse_xyz(a) for a in args.ap]
     ap_names = [f"ap{i}" for i in range(len(ap_xml))]
 

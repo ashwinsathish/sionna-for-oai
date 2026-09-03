@@ -24,6 +24,9 @@ def test_radio_map_texture(db_scale: bool):
 
 def test_colorbar_image():
     image = radio_map_colorbar_to_image(cmap="magma", vmin=-100, vmax=0, dpi=100)
-    assert image.shape == (66, 672, 4)
+    # Exact width depends on the matplotlib version's text metrics (672 px on
+    # some, 670 on others), so assert the shape loosely rather than pinning it.
+    assert image.ndim == 3 and image.shape[0] == 66 and image.shape[2] == 4
+    assert 650 <= image.shape[1] <= 700
     assert np.mean(image[:, :, :3]) > 0.15
     assert np.mean(image[:, :, -1]) > 0.3
